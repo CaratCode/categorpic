@@ -3,6 +3,7 @@ import os
 import Tkinter as tk
 import tkFileDialog 
 import threading
+import tkFont
 from sys import argv
 from sets import Set
 
@@ -50,7 +51,6 @@ def annotateImage(dir,name):
         imageAnnotations[name] = response.web_detection.web_entities
     else:
         imageAnnotations[name] = response.label_annotations
-    print response.label_annotations
     threadLock.release()
 
 #process file's entity information
@@ -167,7 +167,8 @@ class Application(tk.Frame):
         self.logoImg = tk.PhotoImage(file= os.path.join(os.path.dirname(__file__),"assets/logo.gif"))
         self.imageLabel = tk.Label(image=self.logoImg)
         self.imageLabel.grid()
-        self.intro = tk.Label(self, text="""
+        helv = tkFont.Font(family="Helvetica",size=14,weight="bold")
+        self.intro = tk.Label(self, font= helv, text="""
         Choose a folder, categorpic will organize the pictures in it into groups by relation
         """)
         self.intro.grid()
@@ -176,7 +177,7 @@ class Application(tk.Frame):
         self.browseButton.grid()
         self.directoryField = tk.Entry(self, width=30)
         self.directoryField.grid()
-        self.checkButton1 = tk.Radiobutton(self, variable= self.categorizeBy, text="Categorize By Label", value= 0)
+        self.checkButton1 = tk.Radiobutton(self, variable= self.categorizeBy, text="Categorize By Image Content", value= 0)
         self.checkButton1.grid()
         self.checkButton2 = tk.Radiobutton(self, variable= self.categorizeBy, text="Categorize By Web Entity",value= 1)
         self.checkButton2.grid()
@@ -190,10 +191,13 @@ class Application(tk.Frame):
 
     def clearWarning(self):
         self.warning['text'] = ""
-        self.master.update_idletasks()
+        self.master.update()
     def clearFinish(self):
         self.done['text'] = ""
-        self.master.update_idletasks()
+        self.master.update()
+    def loading(self):
+        self.done['text'] = "categorpic-ing ..."
+        self.master.update()
 
     def categorizeClick(self):
         global byEntity
@@ -201,6 +205,7 @@ class Application(tk.Frame):
         self.clearFinish()
         dirPath = self.directoryField.get()
         if(dirPath and os.path.isdir(dirPath)):
+            self.loading()
             byEntity = self.categorizeBy.get()
             categorize(dirPath)
             self.done['text'] = "Finished!"
