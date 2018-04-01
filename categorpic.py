@@ -2,6 +2,7 @@ import io
 import os
 import Tkinter as tk
 import tkFileDialog 
+import threading
 from sys import argv
 from sets import Set
 
@@ -10,16 +11,23 @@ from sets import Set
 from google.cloud import vision
 from google.cloud.vision import types
 
+
 # Instantiates a client
 client = vision.ImageAnnotatorClient()
+# global data structures
+imageAnnotations = {}
 imageEntities = {}
 entityFrequency = {}
 relatedEntities = {}
-topEntities = 7
-folders={}
+MAX_ENTITIES = 7 #maximum entities that we will analyze for an image
+SCORE_THRESHOLD = 0.5 #minimum score needed to be considered a valid enough entity
 
+folders={}
+# global lock for threads
+threadLock = threading.Lock()
+
+#multi-threaded requests to cloud visioin api
 def annotateImage(dir,name):
-    #print "starting image processing"
     # The name of the image file to annotate
     file_name = os.path.join(dir,name)
     # Loads the image into memory
@@ -30,40 +38,64 @@ def annotateImage(dir,name):
 
     # Performs label detection on the image file
     response = client.web_detection(image=image)
-    allEntities = response.web_detection.web_entities
-    #print "done image processing"
+    # acquire lock to store entity information for later use
+    threadLock.acquire()
+    imageAnnotations[name] = response.web_detection.web_entities
+    threadLock.release()
 
-    entities = allEntities#[0:topEntities]
+#process file's entity information
+def processImage(name,entities):
     imageEntities[name] = list(map(lambda entity : entity.description.lower(),entities))
     index = 0
     for ent in entities:
-        if index >= topEntities or ent.score < 0.5: 
+        if index >= MAX_ENTITIES or ent.score < SCORE_THRESHOLD: 
             break
         entity = ent.description.lower()
         if(entity == ""): 
             continue 
         if(entityFrequency.get(entity)):
-            entityFrequency[entity] += topEntities - index
-            otherEntities = entities[0:index] + entities[index+1:topEntities]
+            entityFrequency[entity] += MAX_ENTITIES - index
+            otherEntities = entities[0:index] + entities[index+1:MAX_ENTITIES]
             for related in otherEntities:
                 relatedEntities[entity].add(related.description.lower())
         else:
-            entityFrequency[entity] =  topEntities - index
+            entityFrequency[entity] =  MAX_ENTITIES - index
             relatedEntities[entity] = Set([])
-            otherEntities = entities[0:index] + entities[index+1:topEntities]
+            otherEntities = entities[0:index] + entities[index+1:MAX_ENTITIES]
             for related in otherEntities:
                 relatedEntities[entity].add(related.description.lower())
 
         index += 1
 
+#thread that runs annotateImage
+class annotateThread (threading.Thread):
+    def __init__(self,dir,name):
+        threading.Thread.__init__(self)
+        self.dir = dir
+        self.name = name
+    def run(self):
+        annotateImage(self.dir,self.name)
 
+#starts threads to annotate each image in given directory, processes entities for each file,
+#processes all of the entities found to determine how to categorize the files
+#finally, moves and creates files accordingly
 def categorize(dirPath):
     images = []
+    threads = []
     for filename in os.listdir(dirPath):
         filePath = os.path.join(dirPath,filename)
         if(os.path.isfile(filePath)):
-            annotateImage(dirPath,filename)
             images.append(filename)
+            thread = annotateThread(dir=dirPath,name=filename)
+            thread.start()
+            threads.append(thread)
+
+    for thread in threads:
+        thread.join()
+
+    for filename in imageAnnotations:
+        processImage(filename,imageAnnotations[filename])
+            #annotateImage(dirPath,filename)
     
     sorted_entities = sorted(entityFrequency.items(), reverse=True, key=lambda tuple : tuple[1])
     blackListed = []
@@ -94,7 +126,7 @@ def categorize(dirPath):
         if len(images) == 0 :
             break
     
-
+#GUI stuff
 class Application(tk.Frame): 
     def __init__(self, master=None):
         #member vars
@@ -150,5 +182,3 @@ class Application(tk.Frame):
 app = Application()                    
 app.master.title('Categorpic') 
 app.mainloop()                        
-#if __name__ == "__main__":
-#    main()
