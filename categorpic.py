@@ -19,6 +19,7 @@ imageAnnotations = {}
 imageEntities = {}
 entityFrequency = {}
 relatedEntities = {}
+byEntity = 0
 MAX_ENTITIES = 7 #maximum entities that we will analyze for an image
 SCORE_THRESHOLD = 0.5 #minimum score needed to be considered a valid enough entity
 
@@ -28,6 +29,7 @@ threadLock = threading.Lock()
 
 #multi-threaded requests to cloud visioin api
 def annotateImage(dir,name):
+    global byEntity
     # The name of the image file to annotate
     file_name = os.path.join(dir,name)
     # Loads the image into memory
@@ -36,19 +38,28 @@ def annotateImage(dir,name):
 
     image = types.Image(content=content)
 
+    reponse = None
     # Performs label detection on the image file
-    response = client.web_detection(image=image)
+    if byEntity:
+        response = client.web_detection(image=image)
+    else:
+        response = client.label_detection(image=image)
     # acquire lock to store entity information for later use
     threadLock.acquire()
-    imageAnnotations[name] = response.web_detection.web_entities
+    if byEntity:
+        imageAnnotations[name] = response.web_detection.web_entities
+    else:
+        imageAnnotations[name] = response.label_annotations
+    print response.label_annotations
     threadLock.release()
 
 #process file's entity information
 def processImage(name,entities):
+    global byEntity
     imageEntities[name] = list(map(lambda entity : entity.description.lower(),entities))
     index = 0
     for ent in entities:
-        if index >= MAX_ENTITIES or ent.score < SCORE_THRESHOLD: 
+        if index >= MAX_ENTITIES or (byEntity and ent.score < SCORE_THRESHOLD): 
             break
         entity = ent.description.lower()
         if(entity == ""): 
@@ -129,10 +140,11 @@ def categorize(dirPath):
 #GUI stuff
 class Application(tk.Frame): 
     def __init__(self, master=None):
+        tk.Frame.__init__(self, master)
         #member vars
         self.directoryPath = ""
+        self.categorizeBy = tk.IntVar()
         #setup window
-        tk.Frame.__init__(self, master)
         self.master.geometry('700x500')
         top=self.winfo_toplevel()                
         top.rowconfigure(0, weight=1)            
@@ -144,6 +156,8 @@ class Application(tk.Frame):
         self.createWidgets()
 
     def setDirectory(self):
+        self.clearWarning()
+        self.clearFinish()
         self.directoryPath = tkFileDialog.askdirectory()
         self.directoryField.delete(0, 'end')
         self.directoryField.insert(0, self.directoryPath)
@@ -162,6 +176,10 @@ class Application(tk.Frame):
         self.browseButton.grid()
         self.directoryField = tk.Entry(self, width=30)
         self.directoryField.grid()
+        self.checkButton1 = tk.Radiobutton(self, variable= self.categorizeBy, text="Categorize By Label", value= 0)
+        self.checkButton1.grid()
+        self.checkButton2 = tk.Radiobutton(self, variable= self.categorizeBy, text="Categorize By Web Entity",value= 1)
+        self.checkButton2.grid()
         self.categorizeButton = tk.Button(self, text='Categorpic it!',
             command= self.categorizeClick)      
         self.categorizeButton.grid() 
@@ -170,11 +188,20 @@ class Application(tk.Frame):
         self.done = tk.Label(self, text="", foreground="#0000ff")
         self.done.grid()
 
-    def categorizeClick(self):
+    def clearWarning(self):
         self.warning['text'] = ""
+        self.master.update_idletasks()
+    def clearFinish(self):
         self.done['text'] = ""
+        self.master.update_idletasks()
+
+    def categorizeClick(self):
+        global byEntity
+        self.clearWarning()
+        self.clearFinish()
         dirPath = self.directoryField.get()
         if(dirPath and os.path.isdir(dirPath)):
+            byEntity = self.categorizeBy.get()
             categorize(dirPath)
             self.done['text'] = "Finished!"
         else:
